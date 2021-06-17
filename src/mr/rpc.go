@@ -24,6 +24,25 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+type WorkerArgs struct {
+	cmd int
+	X   int
+	Y   int
+}
+
+//
+//	the communicator between worker and coordinator.
+//	cmd = 0 for map task or success finished.
+//	cmd = 1 for reduce task or failure finished.
+//	cmd = 2 for termination
+//
+type WorkerReply struct {
+	cmd      int
+	X        int
+	Y        int
+	nReduce  int
+	filename string
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.

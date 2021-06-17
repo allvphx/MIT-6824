@@ -1,10 +1,17 @@
 package mr
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
-
 
 //
 // Map functions return a slice of KeyValue.
@@ -13,6 +20,13 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -24,41 +38,163 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+//
+// X is the identifier for the map worker.
+//
+func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nReduce int) {
+	// read each input file
+	// calculate the intermediate keys.
+	intermediate := []KeyValue{}
+
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	file.Close()
+	kva := mapf(filename, string(content))
+	intermediate = append(intermediate, kva...)
+
+	// partition the keys.
+	sort.Sort(ByKey(intermediate))
+
+	tempfiles := []*os.File{}
+	encs := []*json.Encoder{}
+
+	for i := 0; i < nReduce; i++ {
+		tempfile, _ := ioutil.TempFile("./", "mr-temp-*")
+		tempfiles = append(tempfiles, tempfile)
+		encs = append(encs, json.NewEncoder(tempfile))
+	}
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		Y := ihash(intermediate[i].Key) % nReduce
+
+		// use template file to avoid partial write.
+		tempfile := tempfiles[Y]
+		for k := i; k < j; k++ {
+			err := encs[Y].Encode(&intermediate[k])
+			if err != nil {
+				log.Fatalf("encoding error for %v", tempfile.Name())
+			}
+		}
+		i = j
+	}
+
+	// atomic rename of the template file here.
+	for i := 0; i < nReduce; i++ {
+		opath := tempfiles[i].Name()
+		err := os.Rename(opath, "./"+"mr-"+strconv.Itoa(X)+"-"+strconv.Itoa(i))
+		tempfiles[i].Close()
+		if err != nil {
+			log.Fatalf("cannot rename %v", opath)
+		}
+	}
+}
+
+//
+// Y is the identifer for the reduce worker.
+//
+func ReduceWorker(reducef func(string, []string) string, Y int) {
+	// get all the files that writes to Y
+	files, err := filepath.Glob("*-" + strconv.Itoa(Y))
+	if err != nil {
+		log.Fatalf("cannot open the files for %v", Y)
+	}
+
+	intermediate := []KeyValue{}
+
+	for _, fname := range files {
+		file, err := os.Open(fname)
+		if err != nil {
+			log.Fatalf("cannot open %v", fname)
+		}
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+	}
+
+	// partition on the intermediate keys.
+	sort.Sort(ByKey(intermediate))
+
+	ofile, _ := ioutil.TempFile("./", "mr-temp-*")
+
+	// merge and reduce
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+
+	// output the reduced values
+	opath := ofile.Name()
+	err = os.Rename(opath, "./"+"mr-out-"+strconv.Itoa(Y))
+	ofile.Close()
+	if err != nil {
+		log.Fatalf("cannot rename %v", opath)
+	}
+}
 
 //
 // main/mrworker.go calls this function.
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	args := GetWorkerArgs()
 
-	// Your worker implementation here.
+	if args.cmd == 2 {
+		return
+	} else if args.cmd == 0 {
+		MapWorker(mapf, args.filename, args.X, args.nReduce)
+	} else {
+		ReduceWorker(reducef, args.Y)
+	}
 
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
+	if !CallFinished(args) {
+		log.Fatal("the worker failed to call finsihed")
+	}
 }
 
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
+func GetWorkerArgs() WorkerReply {
+	args := WorkerArgs{}
+	reply := WorkerReply{}
+	call("Coordinator.GetArgs", &args, &reply)
+	return reply
+}
 
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	call("Coordinator.Example", &args, &reply)
-
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
+func CallFinished(ctx WorkerReply) bool {
+	args := WorkerArgs{}
+	args.cmd = ctx.cmd
+	args.X = ctx.X
+	args.Y = ctx.Y
+	reply := WorkerReply{}
+	call("Coordinator.Finshied", &args, &reply)
+	return reply.cmd == 0
 }
 
 //
