@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -26,18 +27,32 @@ type Coordinator struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
-func (c *Coordinator) GetTask(args *WorkerReply) {
+func (c *Coordinator) GetArgs(Args *WorkerArgs, Reply *WorkerReply) error {
+	// assign as a mapper or a reducer here.
+	// the blocking is done here
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	// if the mapper task is not finished
+	/*for _, x := range c.mapperState {
+		fmt.Print(x)
+	}
+	fmt.Print("\n")
+	for _, x := range c.reducerState {
+		fmt.Print(x)
+	}
+	fmt.Print("\n")*/
+
+	Reply.Cmd = 2 // default no task
+
 	if c.cMap < c.nMap {
 		for i, state := range c.mapperState {
 			if state == 0 {
 				// the unprocessed mappers
-				state = 1
-				args.cmd = 0
-				args.X = i
-				args.nReduce = c.cReduce
-				args.filename = c.files[i]
+				c.mapperState[i] = 1
+				Reply.Cmd = 0
+				Reply.X = i
+				Reply.NReduce = c.nReduce
+				Reply.Filename = c.files[i]
 				c.beginTime[i] = time.Now()
 				break
 
@@ -45,10 +60,11 @@ func (c *Coordinator) GetTask(args *WorkerReply) {
 				// the time out mapper
 				timeSpan := time.Now().Sub(c.beginTime[i])
 				if timeSpan > 10*time.Second {
-					args.cmd = 0
-					args.X = i
-					args.nReduce = c.cReduce
-					args.filename = c.files[i]
+					fmt.Println("Time out for ", i)
+					Reply.Cmd = 0
+					Reply.X = i
+					Reply.NReduce = c.nReduce
+					Reply.Filename = c.files[i]
 					c.beginTime[i] = time.Now()
 					break
 				}
@@ -58,9 +74,9 @@ func (c *Coordinator) GetTask(args *WorkerReply) {
 		for i, state := range c.reducerState {
 			if state == 0 {
 				// the unprocessed reducers
-				state = 1
-				args.cmd = 1
-				args.Y = i
+				c.reducerState[i] = 1
+				Reply.Cmd = 1
+				Reply.Y = i
 				c.beginTime[i+c.nMap] = time.Now()
 				break
 
@@ -68,40 +84,31 @@ func (c *Coordinator) GetTask(args *WorkerReply) {
 				// the timed-out reducers
 				timeSpan := time.Now().Sub(c.beginTime[i+c.nMap])
 				if timeSpan > 10*time.Second {
-					args.cmd = 1
-					args.Y = i
+					Reply.Cmd = 1
+					Reply.Y = i
 					c.beginTime[i+c.nMap] = time.Now()
 					break
 				}
 			}
 		}
-	} else { // all works are done
-		args.cmd = 2
 	}
 
-	c.mu.Unlock()
-}
-
-func (c *Coordinator) GetArgs(args *WorkerArgs, reply *WorkerReply) error {
-	// assign as a mapper or a reducer here.
-	// the blocking is done here
-	c.GetTask(reply)
 	return nil
 }
 
-func (c *Coordinator) Finshied(args *WorkerArgs, reply *WorkerReply) error {
+func (c *Coordinator) Finsh(Args *WorkerArgs, Reply *WorkerReply) error {
 	// release the task
 	c.mu.Lock()
-	if reply.cmd == 0 && c.mapperState[reply.X] != 2 {
-		c.mapperState[reply.X] = 2
+	defer c.mu.Unlock()
+	if Args.Cmd == 0 && c.mapperState[Args.X] != 2 {
+		c.mapperState[Args.X] = 2
 		c.cMap++
 	}
-	if reply.cmd == 1 && c.reducerState[reply.Y] != 2 {
-		c.reducerState[reply.Y] = 2
+	if Args.Cmd == 1 && c.reducerState[Args.Y] != 2 {
+		c.reducerState[Args.Y] = 2
 		c.cReduce++
 	}
-	c.mu.Unlock()
-	reply.cmd = 0
+	Reply.Cmd = 0
 	return nil
 }
 
@@ -131,6 +138,9 @@ func (c *Coordinator) Done() bool {
 	c.mu.Lock()
 	ret = c.cReduce == c.nReduce
 	c.mu.Unlock()
+	if ret {
+		//		println("Done called with ", c.nReduce, c.cReduce)
+	}
 	return ret
 }
 
@@ -144,8 +154,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		files:        files,
 		nMap:         len(files),
 		nReduce:      nReduce,
-		mapperState:  make([]int, len(files)),
-		reducerState: make([]int, nReduce),
+		mapperState:  make([]int, len(files), len(files)),
+		reducerState: make([]int, nReduce, nReduce),
 		beginTime:    make([]time.Time, len(files)+nReduce), // mapper, then reducer
 	}
 	c.server()

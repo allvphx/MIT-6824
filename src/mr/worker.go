@@ -44,15 +44,17 @@ func ihash(key string) int {
 func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nReduce int) {
 	// read each input file
 	// calculate the intermediate keys.
+	//	fmt.Println("In mapping -- ", X)
+
 	intermediate := []KeyValue{}
 
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot open %v", filename)
+		log.Fatalf("cannot open mapper %v", filename)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatalf("cannot read %v", filename)
+		log.Fatalf("cannot read mapper %v", filename)
 	}
 	file.Close()
 	kva := mapf(filename, string(content))
@@ -104,6 +106,9 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nRe
 // Y is the identifer for the reduce worker.
 //
 func ReduceWorker(reducef func(string, []string) string, Y int) {
+
+	//	fmt.Println("In reducing -- ", Y)
+
 	// get all the files that writes to Y
 	files, err := filepath.Glob("*-" + strconv.Itoa(Y))
 	if err != nil {
@@ -115,7 +120,7 @@ func ReduceWorker(reducef func(string, []string) string, Y int) {
 	for _, fname := range files {
 		file, err := os.Open(fname)
 		if err != nil {
-			log.Fatalf("cannot open %v", fname)
+			log.Fatalf("cannot open reducer %v", fname)
 		}
 		dec := json.NewDecoder(file)
 		for {
@@ -125,6 +130,7 @@ func ReduceWorker(reducef func(string, []string) string, Y int) {
 			}
 			intermediate = append(intermediate, kv)
 		}
+		file.Close()
 	}
 
 	// partition on the intermediate keys.
@@ -165,36 +171,41 @@ func ReduceWorker(reducef func(string, []string) string, Y int) {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-	args := GetWorkerArgs()
+	for {
+		args := GetWorkerArgs()
 
-	if args.cmd == 2 {
-		return
-	} else if args.cmd == 0 {
-		MapWorker(mapf, args.filename, args.X, args.nReduce)
-	} else {
-		ReduceWorker(reducef, args.Y)
-	}
+		if args.Cmd == 2 {
+			return
+		} else if args.Cmd == 0 {
+			MapWorker(mapf, args.Filename, args.X, args.NReduce)
+		} else {
+			ReduceWorker(reducef, args.Y)
+		}
 
-	if !CallFinished(args) {
-		log.Fatal("the worker failed to call finsihed")
+		if !CallFinished(args) {
+			log.Fatal("the worker failed to call finsihed")
+		}
 	}
 }
 
-func GetWorkerArgs() WorkerReply {
+func GetWorkerArgs() *WorkerReply {
 	args := WorkerArgs{}
 	reply := WorkerReply{}
 	call("Coordinator.GetArgs", &args, &reply)
-	return reply
+	//	println(reply.Cmd, reply.X, reply.Y, reply.Filename)
+	return &reply
 }
 
-func CallFinished(ctx WorkerReply) bool {
+func CallFinished(ctx *WorkerReply) bool {
 	args := WorkerArgs{}
-	args.cmd = ctx.cmd
+	args.Cmd = ctx.Cmd
 	args.X = ctx.X
 	args.Y = ctx.Y
 	reply := WorkerReply{}
-	call("Coordinator.Finshied", &args, &reply)
-	return reply.cmd == 0
+	if !call("Coordinator.Finsh", &args, &reply) {
+		return true
+	}
+	return reply.Cmd == 0
 }
 
 //

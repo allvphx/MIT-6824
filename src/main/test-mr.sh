@@ -86,6 +86,7 @@ sleep 1
 # start multiple workers
 timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so &
 timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so
+sleep 1
 
 sort mr-out* | grep . > mr-indexer-all
 if cmp mr-indexer-all mr-correct-indexer.txt
@@ -109,6 +110,8 @@ sleep 1
 
 timeout -k 2s 180s ../mrworker ../../mrapps/mtiming.so &
 timeout -k 2s 180s ../mrworker ../../mrapps/mtiming.so
+
+sleep 1
 
 NT=`cat mr-out* | grep '^times-' | wc -l | sed 's/ //g'`
 if [ "$NT" != "2" ]
@@ -140,6 +143,7 @@ sleep 1
 
 timeout -k 2s 180s ../mrworker ../../mrapps/rtiming.so &
 timeout -k 2s 180s ../mrworker ../../mrapps/rtiming.so
+sleep 1
 
 NT=`cat mr-out* | grep '^[a-z] 2' | wc -l | sed 's/ //g'`
 if [ "$NT" -lt "2" ]
@@ -165,6 +169,8 @@ timeout -k 2s 180s ../mrworker ../../mrapps/jobcount.so &
 timeout -k 2s 180s ../mrworker ../../mrapps/jobcount.so
 timeout -k 2s 180s ../mrworker ../../mrapps/jobcount.so &
 timeout -k 2s 180s ../mrworker ../../mrapps/jobcount.so
+
+sleep 1
 
 NT=`cat mr-out* | awk '{print $2}'`
 if [ "$NT" -ne "8" ]
@@ -201,12 +207,13 @@ timeout -k 2s 180s ../mrworker ../../mrapps/early_exit.so &
 jobs &> /dev/null
 wait -n
 
+wait
+
 # a process has exited. this means that the output should be finalized
 # otherwise, either a worker or the coordinator exited early
 sort mr-out* | grep . > mr-wc-all-initial
 
 # wait for remaining workers and coordinator to exit.
-wait
 
 # compare initial and final outputs
 sort mr-out* | grep . > mr-wc-all-final

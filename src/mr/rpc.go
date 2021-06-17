@@ -25,7 +25,7 @@ type ExampleReply struct {
 // Add your RPC definitions here.
 
 type WorkerArgs struct {
-	cmd int
+	Cmd int
 	X   int
 	Y   int
 }
@@ -37,11 +37,11 @@ type WorkerArgs struct {
 //	cmd = 2 for termination
 //
 type WorkerReply struct {
-	cmd      int
+	Cmd      int
 	X        int
 	Y        int
-	nReduce  int
-	filename string
+	Filename string
+	NReduce  int
 }
 
 // Cook up a unique-ish UNIX-domain socket name
