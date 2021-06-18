@@ -32,17 +32,13 @@ func (c *Coordinator) GetArgs(Args *WorkerArgs, Reply *WorkerReply) error {
 	// the blocking is done here
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// if the mapper task is not finished
-	/*for _, x := range c.mapperState {
-		fmt.Print(x)
-	}
-	fmt.Print("\n")
-	for _, x := range c.reducerState {
-		fmt.Print(x)
-	}
-	fmt.Print("\n")*/
 
 	Reply.Cmd = 2 // default no task
+
+	if c.cReduce == c.nReduce {
+		Reply.Cmd = 3
+		return nil
+	}
 
 	if c.cMap < c.nMap {
 		for i, state := range c.mapperState {

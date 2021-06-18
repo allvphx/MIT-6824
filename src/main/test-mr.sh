@@ -207,13 +207,12 @@ timeout -k 2s 180s ../mrworker ../../mrapps/early_exit.so &
 jobs &> /dev/null
 wait -n
 
-wait
-
 # a process has exited. this means that the output should be finalized
 # otherwise, either a worker or the coordinator exited early
 sort mr-out* | grep . > mr-wc-all-initial
 
 # wait for remaining workers and coordinator to exit.
+wait
 
 # compare initial and final outputs
 sort mr-out* | grep . > mr-wc-all-final
@@ -225,8 +224,7 @@ else
   echo '---' early exit test: FAIL
   failed_any=1
 fi
-rm -f mr-*
-
+#rm -f mr-*
 #########################################################
 echo '***' Starting crash test.
 

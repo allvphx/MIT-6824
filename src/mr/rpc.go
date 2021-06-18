@@ -34,7 +34,8 @@ type WorkerArgs struct {
 //	the communicator between worker and coordinator.
 //	cmd = 0 for map task or success finished.
 //	cmd = 1 for reduce task or failure finished.
-//	cmd = 2 for termination
+//	cmd = 2 for empty round
+//	cmd = 3 for termination
 //
 type WorkerReply struct {
 	Cmd      int

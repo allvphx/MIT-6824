@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -44,7 +45,7 @@ func ihash(key string) int {
 func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nReduce int) {
 	// read each input file
 	// calculate the intermediate keys.
-	//	fmt.Println("In mapping -- ", X)
+	fmt.Println("In mapping -- ", X)
 
 	intermediate := []KeyValue{}
 
@@ -100,6 +101,7 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nRe
 			log.Fatalf("cannot rename %v", opath)
 		}
 	}
+	fmt.Println("Done mapping -- ", X)
 }
 
 //
@@ -107,7 +109,7 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nRe
 //
 func ReduceWorker(reducef func(string, []string) string, Y int) {
 
-	//	fmt.Println("In reducing -- ", Y)
+	fmt.Println("In reducing -- ", Y)
 
 	// get all the files that writes to Y
 	files, err := filepath.Glob("*-" + strconv.Itoa(Y))
@@ -164,6 +166,8 @@ func ReduceWorker(reducef func(string, []string) string, Y int) {
 	if err != nil {
 		log.Fatalf("cannot rename %v", opath)
 	}
+
+	fmt.Println("Done reducing -- ", Y)
 }
 
 //
@@ -175,6 +179,8 @@ func Worker(mapf func(string, string) []KeyValue,
 		args := GetWorkerArgs()
 
 		if args.Cmd == 2 {
+			continue
+		} else if args.Cmd == 3 {
 			return
 		} else if args.Cmd == 0 {
 			MapWorker(mapf, args.Filename, args.X, args.NReduce)
@@ -185,6 +191,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		if !CallFinished(args) {
 			log.Fatal("the worker failed to call finsihed")
 		}
+		time.Sleep(1)
 	}
 }
 
