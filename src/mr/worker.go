@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"time"
 )
 import "log"
 import "net/rpc"
@@ -42,11 +41,9 @@ func ihash(key string) int {
 //
 // X is the identifier for the map worker.
 //
-func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nReduce int) {
+func performMapWork(mapf func(string, string) []KeyValue, filename string, X int, nReduce int) {
 	// read each input file
 	// calculate the intermediate keys.
-	fmt.Println("In mapping -- ", X)
-
 	intermediate := []KeyValue{}
 
 	file, err := os.Open(filename)
@@ -80,7 +77,6 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nRe
 			j++
 		}
 		Y := ihash(intermediate[i].Key) % nReduce
-
 		// use template file to avoid partial write.
 		tempfile := tempfiles[Y]
 		for k := i; k < j; k++ {
@@ -101,16 +97,12 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, X int, nRe
 			log.Fatalf("cannot rename %v", opath)
 		}
 	}
-	fmt.Println("Done mapping -- ", X)
 }
 
 //
 // Y is the identifer for the reduce worker.
 //
-func ReduceWorker(reducef func(string, []string) string, Y int) {
-
-	fmt.Println("In reducing -- ", Y)
-
+func performReduce(reducef func(string, []string) string, Y int) {
 	// get all the files that writes to Y
 	files, err := filepath.Glob("*-" + strconv.Itoa(Y))
 	if err != nil {
@@ -166,8 +158,6 @@ func ReduceWorker(reducef func(string, []string) string, Y int) {
 	if err != nil {
 		log.Fatalf("cannot rename %v", opath)
 	}
-
-	fmt.Println("Done reducing -- ", Y)
 }
 
 //
@@ -178,41 +168,40 @@ func Worker(mapf func(string, string) []KeyValue,
 	for {
 		args := GetWorkerArgs()
 
-		if args.Cmd == 2 {
-			continue
-		} else if args.Cmd == 3 {
-			return
-		} else if args.Cmd == 0 {
-			MapWorker(mapf, args.Filename, args.X, args.NReduce)
-		} else {
-			ReduceWorker(reducef, args.Y)
+		switch args.Type {
+		case Map:
+			performMapWork(mapf, args.Filename, args.X, args.NReduce)
+		case Reduce:
+			performReduce(reducef, args.Y)
+		case Done:
+			break
+		default:
+			fmt.Errorf("Bad type for Args: %s", args.Type)
 		}
 
 		if !CallFinished(args) {
 			log.Fatal("the worker failed to call finsihed")
 		}
-		time.Sleep(1)
 	}
 }
 
 func GetWorkerArgs() *WorkerReply {
 	args := WorkerArgs{}
 	reply := WorkerReply{}
-	call("Coordinator.GetArgs", &args, &reply)
-	//	println(reply.Cmd, reply.X, reply.Y, reply.Filename)
+	call("Coordinator.HandleGetArgs", &args, &reply)
 	return &reply
 }
 
 func CallFinished(ctx *WorkerReply) bool {
 	args := WorkerArgs{}
-	args.Cmd = ctx.Cmd
+	args.Type = ctx.Type
 	args.X = ctx.X
 	args.Y = ctx.Y
 	reply := WorkerReply{}
-	if !call("Coordinator.Finsh", &args, &reply) {
-		return true
+	if !call("Coordinator.HandleFinsh", &args, &reply) {
+		return false
 	}
-	return reply.Cmd == 0
+	return reply.Type == Succeed
 }
 
 //

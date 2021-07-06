@@ -9,36 +9,27 @@ package mr
 import "os"
 import "strconv"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
+type MsgType uint8
 
-type ExampleArgs struct {
-	X int
-}
-
-type ExampleReply struct {
-	Y int
-}
-
-// Add your RPC definitions here.
-
-type WorkerArgs struct {
-	Cmd int
-	X   int
-	Y   int
-}
+const (
+	Map     MsgType = 0
+	Reduce  MsgType = 1
+	Done    MsgType = 2
+	Succeed MsgType = 3
+	Fail    MsgType = 4
+)
 
 //
 //	the communicator between worker and coordinator.
-//	cmd = 0 for map task or success finished.
-//	cmd = 1 for reduce task or failure finished.
-//	cmd = 2 for empty round
-//	cmd = 3 for termination
 //
+type WorkerArgs struct {
+	Type MsgType
+	X    int
+	Y    int
+}
+
 type WorkerReply struct {
-	Cmd      int
+	Type     MsgType
 	X        int
 	Y        int
 	Filename string
