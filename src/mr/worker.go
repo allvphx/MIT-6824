@@ -104,7 +104,7 @@ func performMapWork(mapf func(string, string) []KeyValue, filename string, X int
 //
 func performReduce(reducef func(string, []string) string, Y int) {
 	// get all the files that writes to Y
-	files, err := filepath.Glob("*-" + strconv.Itoa(Y))
+	files, err := filepath.Glob("mr-*-" + strconv.Itoa(Y))
 	if err != nil {
 		log.Fatalf("cannot open the files for %v", Y)
 	}
@@ -174,13 +174,13 @@ func Worker(mapf func(string, string) []KeyValue,
 		case Reduce:
 			performReduce(reducef, args.Y)
 		case Done:
-			break
+			os.Exit(0)
 		default:
 			fmt.Errorf("Bad type for Args: %s", args.Type)
 		}
 
 		if !CallFinished(args) {
-			log.Fatal("the worker failed to call finsihed")
+			fmt.Errorf("the worker failed to call finsihed")
 		}
 	}
 }
@@ -198,7 +198,7 @@ func CallFinished(ctx *WorkerReply) bool {
 	args.X = ctx.X
 	args.Y = ctx.Y
 	reply := WorkerReply{}
-	if !call("Coordinator.HandleFinsh", &args, &reply) {
+	if !call("Coordinator.HandleFinish", &args, &reply) {
 		return false
 	}
 	return reply.Type == Succeed

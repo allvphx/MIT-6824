@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -51,6 +52,13 @@ func (c *Coordinator) setReducer(Reply *WorkerReply, i int) {
 	c.beginTime[i+c.nMap] = time.Now()
 }
 
+func (c *Coordinator) testMapperState() {
+	for _, state := range c.mapperState {
+		fmt.Print(state)
+	}
+	fmt.Print("\n")
+}
+
 func (c *Coordinator) HandleGetArgs(Args *WorkerArgs, Reply *WorkerReply) error {
 	// assign as a mapper or a reducer here.
 	// the blocking is done here
@@ -75,13 +83,13 @@ func (c *Coordinator) HandleGetArgs(Args *WorkerArgs, Reply *WorkerReply) error 
 					}
 				}
 			}
-		} else if c.cReduce < c.nReduce { // if the reducer task is not finished
+		} else if c.cReduce < c.nReduce {
 			for i, state := range c.reducerState {
-				if state == 0 {
+				if state == Waiting {
 					c.setReducer(Reply, i)
 					return nil
 
-				} else if state == 1 {
+				} else if state == Pending {
 					timeSpan := time.Now().Sub(c.beginTime[i+c.nMap])
 					if timeSpan > 10*time.Second {
 						c.setReducer(Reply, i)
@@ -95,7 +103,7 @@ func (c *Coordinator) HandleGetArgs(Args *WorkerArgs, Reply *WorkerReply) error 
 	}
 }
 
-func (c *Coordinator) HandleFinsh(Args *WorkerArgs, Reply *WorkerReply) error {
+func (c *Coordinator) HandleFinish(Args *WorkerArgs, Reply *WorkerReply) error {
 	Reply.Type = Fail
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -158,11 +166,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.cond = sync.NewCond(&c.mu)
 
 	go func() {
-		for {
+		for !c.Done() {
 			c.mu.Lock()
 			c.cond.Broadcast()
 			c.mu.Unlock()
-			time.Sleep(time.Second)
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
