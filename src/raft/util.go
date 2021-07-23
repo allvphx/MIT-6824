@@ -1,13 +1,16 @@
 package raft
 
-import "log"
+import (
+	"fmt"
+	"time"
+)
 
 // Debugging
 const Debug = false
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
+func DPrintf(format string, a ...interface{}) {
 	if Debug {
-		log.Printf(format, a...)
+		fmt.Printf(time.Now().Format("15:04:05.00")+" <---> "+format+"\n", a...)
 	}
 	return
 }
