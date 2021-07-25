@@ -605,8 +605,8 @@ func (rf *Raft) TranState(next Role, term int) bool {
 
 // The pingLoop go routine sends the heartbeats periodically for leader
 func (rf *Raft) pingLoop() {
-	DPrintf("%v [Ping] Start ping", rf)
-	defer DPrintf("%v [Ping] End ping", rf)
+	TDPrintf(&rf.mu, "%v [Ping] Start ping", rf)
+	defer TDPrintf(&rf.mu, "%v [Ping] End ping", rf)
 
 	for !rf.killed() {
 		<-rf.pingTimer.C
@@ -634,6 +634,10 @@ func (rf *Raft) pingLoop() {
 						Entries:      make([]*LogEntry, 0),
 						LeaderID:     rf.me,
 						LeaderCommit: rf.commitIndex,
+					}
+					if len(rf.log) > 0 {
+						args.PrevLogIndex = rf.log[len(rf.log)-1].Index
+						args.PrevLogTerm = rf.log[len(rf.log)-1].Term
 					}
 					rf.mu.Unlock()
 					rf.sendAppendEntry(server, &args, &reps)
