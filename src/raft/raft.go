@@ -448,7 +448,7 @@ func (rf *Raft) tryAppendEntries(server int, mtx *sync.Mutex, Cnd *sync.Cond, re
 }
 
 func (rf *Raft) updateCommitIndex() {
-	for N := len(rf.log); rf.log[N-1].Term == rf.currentTerm && N > rf.commitIndex; N-- {
+	for N := len(rf.log); N > rf.commitIndex; N-- { //rf.log[N-1].Term == rf.currentTerm && ??
 		matchCount := 1
 		for i := 0; i < rf.peerNum; i++ {
 			if i != rf.me && N <= rf.matchIndex[i] {
