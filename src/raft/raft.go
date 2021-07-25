@@ -120,8 +120,8 @@ type Raft struct {
 }
 
 func (rf *Raft) String() string {
-	return fmt.Sprintf("[%s:%d;Term:%d;VotedFor:%d;logLen:%v;Commit:%v;Apply:%v]",
-		role2String(rf.role), rf.me, rf.currentTerm, rf.voteFor, len(rf.log), rf.commitIndex, rf.lastApplied)
+	return fmt.Sprintf("[%s:%d;Term:%d;VotedFor:%d;LD:%d;logLen:%v;Commit:%v;Apply:%v]",
+		role2String(rf.role), rf.me, rf.currentTerm, rf.voteFor, rf.leaderID, len(rf.log), rf.commitIndex, rf.lastApplied)
 }
 
 func Min(x int, y int) int {
@@ -330,21 +330,17 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		return
 	}
 
+	//	DPrintf("%s [Election] Election timer reseted", rf)
+	rf.electionTimer.Reset(getRandElectTimeout())
+	if rf.leaderID != args.LeaderID {
+		rf.TranState(Follower, args.Term)
+		rf.leaderID = args.LeaderID
+	}
+
 	if len(rf.log) < args.PrevLogIndex {
 		reply.Success = false
 		reply.Dec = true
 		return
-	}
-
-	//	DPrintf("%s [Election] Election timer reseted", rf)
-	rf.electionTimer.Reset(getRandElectTimeout())
-	if len(args.Entries) == 0 {
-		// ping request
-		if rf.leaderID != args.LeaderID {
-			rf.TranState(Follower, args.Term)
-			rf.leaderID = args.LeaderID
-			rf.voteFor = -1
-		}
 	}
 
 	if args.PrevLogIndex > 0 && rf.log[args.PrevLogIndex-1].Term != args.PrevLogTerm {
@@ -452,19 +448,18 @@ func (rf *Raft) tryAppendEntries(server int, mtx *sync.Mutex, Cnd *sync.Cond, re
 }
 
 func (rf *Raft) updateCommitIndex() {
-	for {
+	for N := len(rf.log); rf.log[N-1].Term == rf.currentTerm && N > rf.commitIndex; N-- {
 		matchCount := 1
 		for i := 0; i < rf.peerNum; i++ {
-			if i != rf.me && rf.commitIndex < rf.matchIndex[i] {
+			if i != rf.me && N <= rf.matchIndex[i] {
 				matchCount++
 			}
 		}
 
-		DPrintf("%s [APP] Try to inc commitIndex to %d with match count %d", rf, rf.commitIndex+1, matchCount)
+		DPrintf("%s [APP] Try to inc commitIndex to %d with match count %d", rf, N, matchCount)
 
-		if matchCount*2 > rf.peerNum && rf.log[rf.commitIndex].Term == rf.currentTerm {
-			rf.commitIndex++
-		} else {
+		if matchCount*2 > rf.peerNum { //!!!!
+			rf.commitIndex = N
 			break
 		}
 	}
@@ -644,7 +639,7 @@ func (rf *Raft) pingLoop() {
 					rf.mu.Lock()
 					//					DPrintf("%s [Ping] Sends ping to %d, done", rf, server)
 					rf.mu.Unlock()
-				}(i) // shall we add a lock to this i ?
+				}(i)
 			}
 		}
 	}
