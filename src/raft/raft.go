@@ -416,16 +416,22 @@ func (rf *Raft) tryAppendEntries(server int, mtx *sync.Mutex, Cnd *sync.Cond, re
 		ok := rf.sendAppendEntry(server, &args, &reps)
 
 		rf.mu.Lock()
-		if args.Term != rf.currentTerm {
-			DPrintf("%s [APP] The term is changed from %d to %d", rf, server, args.Term, rf.currentTerm)
+		if args.Term != rf.currentTerm || rf.role != Leader { // it is not valid anymore
+			mtx.Lock()
+			*voteCount = 0
+			*remainPost = 0
+			DPrintf("%s [APP] invalid sent for index %d - %d", rf, args.PrevLogIndex, args.PrevLogTerm+len(entries))
 			rf.mu.Unlock()
+			Cnd.Broadcast()
+			mtx.Unlock()
 			return
 		}
 
-		if rf.role != Leader || (!reps.Success && !reps.Dec) || !ok {
+		if (!reps.Success && !reps.Dec) || !ok {
 			// the later two will not happen
-			rf.mu.Unlock()
 			mtx.Lock()
+			*remainPost = Max(*remainPost-1, 0)
+			rf.mu.Unlock()
 			Cnd.Broadcast()
 			mtx.Unlock()
 			return
@@ -434,7 +440,7 @@ func (rf *Raft) tryAppendEntries(server int, mtx *sync.Mutex, Cnd *sync.Cond, re
 		mtx.Lock()
 		if reps.Success {
 			*voteCount++
-			*remainPost--
+			*remainPost = Max(*remainPost-1, 0)
 			rf.nextIndex[server] = tailIndex + 1
 			rf.matchIndex[server] = tailIndex
 			if *voteCount*2 > rf.peerNum || (*voteCount+*remainPost)*2 < rf.peerNum {
