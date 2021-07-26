@@ -648,7 +648,6 @@ func (rf *Raft) pingLoop() {
 			rf.mu.Unlock()
 			return
 		}
-		//		DPrintf("%v [Ping] Start next ping round", rf)
 		rf.mu.Unlock()
 
 		for i := 0; i < rf.peerNum; i++ {
@@ -662,16 +661,6 @@ func (rf *Raft) pingLoop() {
 					if rf.role != Leader {
 						rf.mu.Unlock()
 						return
-					}
-					args := AppendEntryArgs{
-						Term:         rf.currentTerm,
-						Entries:      make([]*LogEntry, 0),
-						LeaderID:     rf.me,
-						LeaderCommit: rf.commitIndex,
-					}
-					if len(rf.log) > 0 {
-						args.PrevLogIndex = rf.log[len(rf.log)-1].Index
-						args.PrevLogTerm = rf.log[len(rf.log)-1].Term
 					}
 					rf.mu.Unlock()
 					rf.tryAppendEntries(server, &mtx, Cnd, &remainPost, &voteCount)
