@@ -416,6 +416,12 @@ func (rf *Raft) tryAppendEntries(server int, mtx *sync.Mutex, Cnd *sync.Cond, re
 		ok := rf.sendAppendEntry(server, &args, &reps)
 
 		rf.mu.Lock()
+		if args.Term != rf.currentTerm {
+			DPrintf("%s [APP] The term is changed from %d to %d", rf, server, args.Term, rf.currentTerm)
+			rf.mu.Unlock()
+			return
+		}
+
 		if rf.role != Leader || (!reps.Success && !reps.Dec) || !ok {
 			// the later two will not happen
 			rf.mu.Unlock()
@@ -726,10 +732,14 @@ func (rf *Raft) electionLoop() {
 
 		rf.mu.Lock()
 		DPrintf("%s: [Election] Try to become leader, with %d vote(s)", rf, voteCount)
-		if rf.role == Candidate && voteCount*2 > rf.peerNum {
+		if rf.role == Candidate {
 			// if the candidate has not been transformed into a follower by one leader,
 			//it is elected as the new leader
-			rf.TranState(Leader, rf.currentTerm)
+			if voteCount*2 > rf.peerNum {
+				rf.TranState(Leader, rf.currentTerm)
+			} else {
+				rf.currentTerm--
+			}
 		}
 		rf.mu.Unlock()
 	}
