@@ -19,6 +19,8 @@ package raft
 
 import "C"
 import (
+	"6.824/labgob"
+	"bytes"
 	"fmt"
 	"math/rand"
 	//	"bytes"
@@ -169,14 +171,23 @@ func (rf *Raft) apply(entry *LogEntry, applychan chan ApplyMsg) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	err := e.Encode(rf.currentTerm)
+	if err != nil {
+		DPrintf("%v [APK] Encoding currentTerm Error", rf)
+	}
+	err = e.Encode(rf.voteFor)
+	if err != nil {
+		DPrintf("%v [APK] Encoding voteFor Error", rf)
+	}
+	err = e.Encode(rf.log)
+	if err != nil {
+		DPrintf("%v [APK] Encoding log Error", rf)
+	}
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
+	DPrintf("%v [APK] Persist saved with term:%d;voteFor%d;len(log):%d", rf, rf.currentTerm, rf.voteFor, len(rf.log))
 }
 
 //
@@ -184,21 +195,24 @@ func (rf *Raft) persist() {
 //
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
+		DPrintf("%v [APK] Bootstrap without any state", rf)
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm = 0
+	var voteFor = 0
+	var log = make([]*LogEntry, 0)
+	if d.Decode(&currentTerm) != nil || d.Decode(&voteFor) != nil || d.Decode(&log) != nil {
+		DPrintf("%v [APK] Decoding not found", rf)
+	} else {
+		rf.mu.Lock()
+		DPrintf("%v [APK] Data loaded with term:%d;voteFor%d;len(log):%d", rf, rf.currentTerm, rf.voteFor, len(rf.log))
+		rf.currentTerm = currentTerm
+		rf.voteFor = voteFor
+		rf.log = log
+		rf.mu.Unlock()
+	}
 }
 
 //
@@ -280,6 +294,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		//		DPrintf("%s [Election] Election timer reseted", rf)
 		rf.electionTimer.Reset(getRandElectTimeout())
 		rf.voteFor = args.CandidateID
+		rf.persist()
 	}
 }
 
@@ -332,7 +347,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	//	DPrintf("%s [Election] Election timer reseted", rf)
 	rf.electionTimer.Reset(getRandElectTimeout())
-	if rf.leaderID != args.LeaderID {
+	if rf.role == Candidate {
 		rf.TranState(Follower, args.Term)
 		rf.leaderID = args.LeaderID
 	}
@@ -360,16 +375,19 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		//		DPrintf("%s [APP] the index is %d, the log is %d", rf, index, len(rf.log))
 		if index < len(rf.log) && !rf.log[index].CheckSame(args.Entries[i]) { // remove the conflict entry and the following ones
 			rf.log = rf.log[:index]
+			rf.persist()
 		}
 		if len(rf.log) <= index { // append the different entries behind
-			DPrintf("%s [APP] Entries attached with separate point %d", rf, i)
 			rf.log = append(rf.log, args.Entries[i:]...)
+			DPrintf("%s [APP] Entries attached with separate point %d", rf, i)
+			rf.persist()
 			break
 		}
 	}
 
 	if rf.commitIndex < args.LeaderCommit {
 		rf.commitIndex = Min(args.LeaderCommit, len(rf.log))
+		DPrintf("%s [APP] CommitIndex updated", rf)
 	}
 }
 
@@ -468,10 +486,9 @@ func (rf *Raft) updateCommitIndex() {
 			}
 		}
 
-		DPrintf("%s [APP] Try to inc commitIndex to %d with match count %d", rf, N, matchCount)
-
 		if matchCount*2 > rf.peerNum { //!!!!
 			rf.commitIndex = N
+			DPrintf("%s [APP] Inc commitIndex to %d with match count %d", rf, N, matchCount)
 			break
 		}
 	}
@@ -539,6 +556,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	DPrintf("%s [APP] client request received, with index %d", rf, index)
 	newLog := &LogEntry{Term: term, Index: index, Cmd: command}
 	rf.log = append(rf.log, newLog)
+	rf.persist()
 	go rf.broadcastAppendEntry()
 
 	return index, term, isLeader
@@ -578,6 +596,8 @@ func (rf *Raft) TranState(next Role, term int) bool {
 		}
 		rf.role = Leader
 		rf.leaderID = rf.me
+		rf.persist()
+
 		for i := 0; i < rf.peerNum; i++ {
 			rf.matchIndex[i] = 0
 			rf.nextIndex[i] = len(rf.log) + 1
@@ -593,12 +613,16 @@ func (rf *Raft) TranState(next Role, term int) bool {
 		DPrintf("%s [StateChange] Begin changing to candidate", rf)
 		rf.role = Candidate
 		rf.voteFor = rf.me
+		rf.persist()
+
 		rf.leaderID = -1
 		DPrintf("%s [StateChange] Changed to candidate", rf)
 	case Follower:
 		DPrintf("%s [StateChange] Begin changing to follower with Term %d", rf, term)
 		rf.role = Follower
 		rf.voteFor = -1
+		rf.persist()
+
 		rf.leaderID = -1
 		rand.Seed(time.Now().UnixNano())
 		rf.electionTimer.Reset(getRandElectTimeout())
@@ -630,7 +654,10 @@ func (rf *Raft) pingLoop() {
 		for i := 0; i < rf.peerNum; i++ {
 			if i != rf.me {
 				go func(server int) {
-					reps := AppendEntryReply{}
+					mtx := sync.Mutex{}
+					Cnd := sync.NewCond(&mtx)
+					voteCount := 1
+					remainPost := 1
 					rf.mu.Lock()
 					if rf.role != Leader {
 						rf.mu.Unlock()
@@ -647,9 +674,9 @@ func (rf *Raft) pingLoop() {
 						args.PrevLogTerm = rf.log[len(rf.log)-1].Term
 					}
 					rf.mu.Unlock()
-					rf.sendAppendEntry(server, &args, &reps)
+					rf.tryAppendEntries(server, &mtx, Cnd, &remainPost, &voteCount)
 					rf.mu.Lock()
-					//					DPrintf("%s [Ping] Sends ping to %d, done", rf, server)
+					DPrintf("%s [Ping] Sends ping to %d, done", rf, server)
 					rf.mu.Unlock()
 				}(i)
 			}
@@ -745,6 +772,7 @@ func (rf *Raft) electionLoop() {
 				rf.TranState(Leader, rf.currentTerm)
 			} else {
 				rf.currentTerm--
+				rf.persist()
 			}
 		}
 		rf.mu.Unlock()
