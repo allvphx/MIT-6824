@@ -457,7 +457,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 // wait for at least n servers to commit.
 // but don't wait forever.
 func (cfg *config) wait(index int, n int, startTerm int) interface{} {
-	to := 20 * time.Millisecond
+	to := 10 * time.Millisecond
 	for iters := 0; iters < 30; iters++ {
 		nd, _ := cfg.nCommitted(index)
 		if nd >= n {
