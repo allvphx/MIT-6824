@@ -578,7 +578,7 @@ func (rf *Raft) broadcastVoteRequest() int {
 				ok := rf.sendRequestVote(server, &args, &reps)
 				rf.mu.Lock()
 
-				if ok && reps.VoteGranted && rf.role == Candidate {
+				if ok && reps.VoteGranted && rf.role == Candidate && rf.currentTerm == args.Term {
 					voteCount++
 				}
 				remainPost = Max(0, remainPost-1)
@@ -608,10 +608,13 @@ func (rf *Raft) broadcastAppendEntry() {
 	voteCount := 1
 	Cnd := sync.NewCond(&rf.mu)
 	remainPost := rf.peerNum - 1
+	rf.mu.Lock()
+	Term := rf.currentTerm
+	rf.mu.Unlock()
 
 	for i := 0; i < rf.peerNum; i++ {
 		if i != rf.me {
-			go rf.tryAppendEntries(i, Cnd, &remainPost, &voteCount)
+			go rf.tryAppendEntries(i, Cnd, &remainPost, &voteCount, Term)
 		}
 	}
 
@@ -626,7 +629,7 @@ func (rf *Raft) broadcastAppendEntry() {
 	}
 
 	rf.mu.Lock()
-	if 2*voteCount > rf.peerNum && rf.role == Leader {
+	if 2*voteCount > rf.peerNum && rf.role == Leader && Term == rf.currentTerm {
 		rf.updateCommitIndex()
 	}
 	rf.mu.Unlock()
@@ -649,7 +652,7 @@ func (rf *Raft) updateCommitIndex() {
 	}
 }
 
-func (rf *Raft) tryAppendEntries(server int, Cnd *sync.Cond, remainPost *int, voteCount *int) {
+func (rf *Raft) tryAppendEntries(server int, Cnd *sync.Cond, remainPost *int, voteCount *int, Term int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	reps := AppendEntryReply{}
@@ -677,11 +680,18 @@ func (rf *Raft) tryAppendEntries(server int, Cnd *sync.Cond, remainPost *int, vo
 			}
 		}
 
+		if Term != rf.currentTerm {
+			*remainPost = 0
+			DPrintf("%s [APP] invalid sent to %d for index %d - %d, for overdated leader", rf, server, args.PrevLogIndex, args.PrevLogTerm)
+			Cnd.Broadcast()
+			return
+		}
+
 		rf.mu.Unlock()
 		ok := rf.sendAppendEntry(server, &args, &reps)
 		rf.mu.Lock()
 
-		if args.Term != rf.currentTerm {
+		if Term != rf.currentTerm {
 			*remainPost = 0
 			DPrintf("%s [APP] invalid sent to %d for index %d - %d, for overdated leader", rf, server, args.PrevLogIndex, args.PrevLogTerm)
 			Cnd.Broadcast()
@@ -766,13 +776,16 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) pingLoop() {
 	//	TDPrintf(&rf.mu, "%v [Ping] Start ping", rf)
 	//	defer TDPrintf(&rf.mu, "%v [Ping] End ping", rf)
+	rf.mu.Lock()
+	Term := rf.currentTerm
+	rf.mu.Unlock()
 
 	for !rf.killed() {
 		<-rf.pingTimer.C
 		rf.pingTimer.Reset(HeartBeatInterval)
 
 		rf.mu.Lock()
-		if rf.role != Leader {
+		if rf.role != Leader || rf.currentTerm != Term {
 			rf.mu.Unlock()
 			return
 		}
@@ -785,12 +798,12 @@ func (rf *Raft) pingLoop() {
 					voteCount := 1
 					remainPost := 1
 					rf.mu.Lock()
-					if rf.role != Leader {
+					if rf.role != Leader || rf.currentTerm != Term {
 						rf.mu.Unlock()
 						return
 					}
 					rf.mu.Unlock()
-					rf.tryAppendEntries(server, Cnd, &remainPost, &voteCount)
+					rf.tryAppendEntries(server, Cnd, &remainPost, &voteCount, Term)
 					rf.mu.Lock()
 					//					DPrintf("%s [Ping] Sends ping to %d, done", rf, server)
 					rf.mu.Unlock()
@@ -816,13 +829,14 @@ func (rf *Raft) electionLoop() {
 		}
 		//		DPrintf("%s [Election] Election triggered at %v", rf, timeNow)
 		rf.TranState(Candidate, rf.currentTerm+1)
+		TermNow := rf.currentTerm
 		rf.mu.Unlock()
 
 		voteCount := rf.broadcastVoteRequest()
 
 		rf.mu.Lock()
 		//		DPrintf("%s: [Election] Try to become leader, with %d vote(s)", rf, voteCount)
-		if rf.role == Candidate {
+		if rf.role == Candidate && rf.currentTerm == TermNow {
 			// if the candidate has not been transformed into a follower by one leader,
 			//it is elected as the new leader
 			if voteCount*2 > rf.peerNum {
