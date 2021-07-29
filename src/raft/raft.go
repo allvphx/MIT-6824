@@ -163,6 +163,16 @@ func (rf *Raft) indexADDSnapshot(index int) int {
 	return index + rf.lastIncludedIndex
 }
 
+func (rf *Raft) getLast() *LogEntry {
+	if len(rf.log) > 0 {
+		return rf.getLog(rf.getLogLen())
+	}
+	return &LogEntry{
+		Term:  rf.lastIncludedTerm,
+		Index: rf.lastIncludedIndex,
+	}
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -238,17 +248,15 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	//	if
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	/*
-		if rf.lastIncludedIndex > lastIncludedIndex || rf.lastIncludedTerm > lastIncludedTerm {
-			return false
-		}
+	if rf.lastIncludedIndex > lastIncludedIndex || rf.lastIncludedTerm > lastIncludedTerm {
+		return false
+	}
 
-		rf.lastIncludedIndex = lastIncludedIndex
-		rf.lastIncludedTerm = lastIncludedTerm
-		rf.lastApplied = lastIncludedIndex
+	rf.lastIncludedIndex = lastIncludedIndex
+	rf.lastIncludedTerm = lastIncludedTerm
+	rf.lastApplied = lastIncludedIndex
 
-		rf.persister.SaveStateAndSnapshot(rf.raftStateForPersist(), snapshot)
-	*/
+	rf.persister.SaveStateAndSnapshot(rf.raftStateForPersist(), snapshot)
 	return true
 }
 
@@ -259,18 +267,16 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	/*
-		entry := rf.log[index-1]
-		DPrintf("[%v] [SNAP] Snapshot with index index[%v]  rf.Log[%v]", rf, index, rf.log)
+	var entry = rf.log[index-1]
+	DPrintf("[%v] [SNAP] Snapshot with index index[%v]  rf.Log[%v]", rf, index, rf.log)
 
-		rf.log = rf.log[index:]
-		rf.lastIncludedIndex = entry.Index
-		rf.lastIncludedTerm = entry.Term
-		rf.lastApplied = entry.Index
+	rf.log = rf.log[index:]
+	rf.lastIncludedIndex = entry.Index
+	rf.lastIncludedTerm = entry.Term
+	rf.lastApplied = entry.Index
 
-		rf.persister.SaveStateAndSnapshot(rf.raftStateForPersist(), snapshot)
-		rf.persist()
-	*/
+	rf.persister.SaveStateAndSnapshot(rf.raftStateForPersist(), snapshot)
+	rf.persist()
 }
 
 // (Thread unsafe) If the received Term is bigger, transform into the Follower
@@ -286,14 +292,14 @@ func (rf *Raft) isUpToDate(index int, term int) bool {
 	if rf.getLogLen() == 0 {
 		return true
 	}
-	tailLog := *rf.getLog(rf.getLogLen())
+	tailLog := rf.getLast()
 	if term > tailLog.Term {
 		return true
 	}
 	return term == tailLog.Term && index >= rf.getLogLen()
 }
 
-// (Thread unsafe) To transform the state into next, with new Term
+// TranState (Thread unsafe) To transform the state into next, with new Term.
 func (rf *Raft) TranState(next Role, term int) bool {
 	rf.currentTerm = term
 	switch next {
@@ -413,7 +419,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 
-// snapshot supported
+// AppendEntry snapshot supported
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -563,10 +569,10 @@ func (rf *Raft) broadcastVoteRequest() int {
 				args := RequestVoteArgs{
 					Term:         rf.currentTerm,
 					CandidateID:  rf.me,
-					LastlogIndex: rf.getLogLen(),
+					LastlogIndex: rf.getLast().Index,
 				}
 				if rf.getLogLen() > 0 {
-					args.LastlogTerm = rf.getLog(rf.getLogLen()).Term
+					args.LastlogTerm = rf.getLast().Term
 				}
 
 				if remainPost == 0 {
