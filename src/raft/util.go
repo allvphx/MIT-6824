@@ -1,13 +1,26 @@
 package raft
 
-import "log"
+import (
+	"fmt"
+	"sync"
+	"time"
+)
 
 // Debugging
 const Debug = false
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
+func DPrintf(format string, a ...interface{}) {
 	if Debug {
-		log.Printf(format, a...)
+		fmt.Printf(time.Now().Format("15:04:05.00")+" <---> "+format+"\n", a...)
 	}
+	return
+}
+
+func TDPrintf(mu *sync.Mutex, format string, a ...interface{}) {
+	mu.Lock()
+	if Debug {
+		fmt.Printf(time.Now().Format("15:04:05.00")+" <---> "+format+"\n", a...)
+	}
+	mu.Unlock()
 	return
 }
