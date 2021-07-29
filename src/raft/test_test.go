@@ -1039,10 +1039,19 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		}
 		// send enough to get a snapshot
 		for i := 0; i < SnapShotInterval+1; i++ {
+			if Debug {
+				fmt.Printf("[SNAP] To start the %dth\n", i+1)
+			}
 			cfg.rafts[sender].Start(rand.Int())
+		}
+		if Debug {
+			fmt.Printf("[SNAP] To start the %dth\n", i+1)
 		}
 		// let applier threads catch up with the Start()'s
 		cfg.one(rand.Int(), servers-1, true)
+		if Debug {
+			fmt.Printf("[SNAP] To start the %dth\n", i+1)
+		}
 
 		if cfg.LogSize() >= MAXLOGSIZE {
 			cfg.t.Fatalf("Log size too large")
