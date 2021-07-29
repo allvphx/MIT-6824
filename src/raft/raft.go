@@ -679,6 +679,8 @@ func (rf *Raft) sendSnapShot(server int) bool {
 		Snapshot:         rf.persister.ReadSnapshot(),
 	}
 	snapReps := InstallSnapshotReply{}
+	rf.mu.Unlock()
+	defer rf.mu.Lock()
 	return rf.sendInstallSnapshot(server, &snapArgs, &snapReps)
 }
 
@@ -722,9 +724,7 @@ func (rf *Raft) tryAppendEntries(server int, Cnd *sync.Cond, remainPost *int, vo
 		ok := true
 
 		if args.PrevLogIndex == 0 && rf.lastIncludedIndex > 0 {
-			rf.mu.Unlock()
 			ok = ok && rf.sendSnapShot(server)
-			rf.mu.Lock()
 			args.PrevLogIndex = rf.lastIncludedIndex
 			args.PrevLogTerm = rf.lastIncludedTerm
 		}
